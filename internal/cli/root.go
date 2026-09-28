@@ -109,6 +109,7 @@ func newRootCmd() *cobra.Command {
 		newConfigCmd(g),
 		newDownloadCmd(g),
 		newLoginCmd(g),
+		newLsCmd(g),
 		newUploadCmd(g),
 		newLogoutCmd(g),
 		newWhoamiCmd(g),

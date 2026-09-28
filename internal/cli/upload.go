@@ -13,6 +13,7 @@ type moveOptions struct {
 	remote       string
 	workers      int
 	skipExisting bool
+	inPlace      bool
 	dryRun       bool
 }
 
@@ -84,7 +85,7 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 				Connect: func() transfer.Conn {
 					return connect()
 				},
-				Move:     transfer.Uploader(opts.skipExisting),
+				Move:     transfer.Uploader(opts.skipExisting, opts.inPlace),
 				OnResult: reporter{name: remoteSide}.report,
 			})
 
@@ -99,6 +100,8 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 	}
 
 	opts.bind(cmd, "local file or directory to send", "destination directory on the server, relative to base_dir")
+
+	cmd.Flags().BoolVar(&opts.inPlace, "inplace", false, "write straight to the target name instead of uploading and renaming")
 
 	return cmd
 }

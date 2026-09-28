@@ -11,7 +11,7 @@ import (
 
 // Uploader sends a local file to the server, creating the directory it belongs
 // in on the way.
-func Uploader(skipExisting bool) Operation {
+func Uploader(skipExisting, inPlace bool) Operation {
 	return func(ctx context.Context, conn Conn, job Job) (Outcome, error) {
 		if err := conn.EnsureDir(ctx, path.Dir(job.Remote)); err != nil {
 			return Moved, err
@@ -31,12 +31,51 @@ func Uploader(skipExisting bool) Operation {
 			_ = file.Close()
 		}()
 
-		if err := conn.Upload(ctx, job.Remote, file); err != nil {
+		if inPlace {
+			if err := conn.Upload(ctx, job.Remote, file); err != nil {
+				return Moved, err
+			}
+
+			return Moved, nil
+		}
+
+		scratch := scratchName(job.Remote)
+
+		if err := conn.Upload(ctx, scratch, file); err != nil {
+			_ = conn.Remove(ctx, scratch)
+			return Moved, err
+		}
+
+		if err := putInPlace(ctx, conn, scratch, job.Remote); err != nil {
+			_ = conn.Remove(ctx, scratch)
 			return Moved, err
 		}
 
 		return Moved, nil
 	}
+}
+
+// scratchName sits next to the target, which keeps the rename inside one
+// directory and off any other filesystem the server may have mounted.
+func scratchName(remote string) string {
+	return path.Join(path.Dir(remote), ".go-ftp-"+path.Base(remote)+".part")
+}
+
+// putInPlace renames the finished upload over the target.
+func putInPlace(ctx context.Context, conn Conn, from, to string) error {
+	err := conn.Rename(ctx, from, to)
+	if err == nil {
+		return nil
+	}
+
+	if _, exists := conn.Size(ctx, to); !exists {
+		return err
+	}
+	if removeErr := conn.Remove(ctx, to); removeErr != nil {
+		return err
+	}
+
+	return conn.Rename(ctx, from, to)
 }
 
 // Downloader brings a remote file here. It writes to a temporary name and
