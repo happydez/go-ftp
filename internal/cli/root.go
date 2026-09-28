@@ -62,6 +62,9 @@ func Execute(ctx context.Context) int {
 	case errors.Is(err, context.Canceled):
 		ui.Warn("interrupted")
 		return exitFailure
+	case errors.Is(err, context.DeadlineExceeded):
+		ui.Error("the run ran out of time, see transfer.timeout in the config")
+		return exitFailure
 	default:
 		ui.Error("%v", err)
 		return exitFailure
@@ -104,7 +107,9 @@ func newRootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newConfigCmd(g),
+		newDownloadCmd(g),
 		newLoginCmd(g),
+		newUploadCmd(g),
 		newLogoutCmd(g),
 		newWhoamiCmd(g),
 		newVersionCmd(),

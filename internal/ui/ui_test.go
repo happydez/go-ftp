@@ -69,3 +69,23 @@ func TestDebugOnlyWhenVerbose(t *testing.T) {
 		t.Fatalf("debug should print when verbose, got %q", stderr.String())
 	}
 }
+
+func TestBytes(t *testing.T) {
+	cases := map[int64]string{
+		0:                      "0 B",
+		1:                      "1 B",
+		1023:                   "1023 B",
+		1024:                   "1.0 KB",
+		1536:                   "1.5 KB",
+		1024 * 1024:            "1.0 MB",
+		3*1024*1024 + 512*1024: "3.5 MB",
+		1024 * 1024 * 1024:     "1.0 GB",
+		1 << 50:                "1.0 PB",
+	}
+
+	for in, want := range cases {
+		if got := Bytes(in); got != want {
+			t.Errorf("Bytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
