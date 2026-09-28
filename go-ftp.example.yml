@@ -1,0 +1,36 @@
+# Copy this to go-ftp.yml next to the binary, or to the user config directory
+# (~/.config/go-ftp/config.yml, %AppData%\go-ftp\config.yml on Windows).
+#
+# There are no passwords here. Run `go-ftp login`
+# to store one, or pass it in GOFTP_PASSWORD.
+
+current_profile: local
+
+profiles:
+  local:
+    host: 127.0.0.1
+    port: 21
+    user: user
+    # Every remote path a command is given is resolved against this directory,
+    # and nothing above it can be reached.
+    base_dir: /my
+    tls: false
+
+  prod:
+    host: ftp.example.com
+    port: 21
+    user: deploy
+    base_dir: /upload
+    # Explicit FTPS over AUTH TLS.
+    tls: true
+    # Accept a certificate that does not verify. Only for a server you know.
+    tls_insecure: false
+
+transfer:
+  # Files in flight at once. Every worker holds its own FTP connection.
+  workers: 4
+  # Attempts per file on top of the first try.
+  max_retries: 3
+  # A deadline for the whole run, not for one file. 0 means no limit and that
+  # is the default, so that a big upload does not die on a wall clock.
+  timeout: 0
