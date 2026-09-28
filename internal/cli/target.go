@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/happydez/go-ftp/internal/config"
 	"github.com/happydez/go-ftp/internal/creds"
+	"github.com/happydez/go-ftp/internal/ftpx"
 )
 
 // config loads the file the flags point at, or the first one the search finds.
@@ -39,4 +40,64 @@ func (g *globalOptions) credentials() (*creds.Store, error) {
 	}
 
 	return store, nil
+}
+
+// session is the resolved answer to which server a command works with and how
+// it authenticates.
+type session struct {
+	cfg      *config.Config
+	profile  config.Profile
+	store    *creds.Store
+	password string
+	source   creds.Source
+}
+
+// session gathers the config, the profile and the password.
+func (g *globalOptions) session() (*session, error) {
+	cfg, profile, err := g.target()
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := g.credentials()
+	if err != nil {
+		return nil, err
+	}
+
+	password, source, err := creds.Resolve(creds.Options{
+		Profile: profile.Name(),
+		Store:   store,
+	})
+	if err != nil {
+		password, source = "", creds.SourceNone
+	}
+
+	return &session{
+		cfg:      cfg,
+		profile:  profile,
+		store:    store,
+		password: password,
+		source:   source,
+	}, nil
+}
+
+// client builds a connection for the profile, and is where a missing password
+// finally becomes an error.
+func (s *session) client() (*ftpx.Client, error) {
+	if s.source == creds.SourceNone {
+		return nil, newUsageError("no password for profile %q, run `go-ftp login` or set %s", s.profile.Name(), creds.EnvPassword)
+	}
+
+	return newClient(s.profile, s.password), nil
+}
+
+func newClient(profile config.Profile, password string) *ftpx.Client {
+	return ftpx.New(ftpx.Options{
+		Addr:        profile.Addr(),
+		Host:        profile.Host,
+		User:        creds.User(profile.User),
+		Password:    password,
+		TLS:         profile.TLS,
+		TLSInsecure: profile.TLSInsecure,
+	})
 }

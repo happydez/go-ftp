@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -15,14 +16,16 @@ import (
 )
 
 func newLoginCmd(g *globalOptions) *cobra.Command {
-	var fromStdin bool
+	var (
+		fromStdin bool
+		noVerify  bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Store the password for a profile",
-		Long: "login asks for the password of the active profile and writes it to the\n" +
-			"credentials file, which lives outside the config so that the config stays\n" +
-			"safe to commit.",
+		Long: "login asks for the password of the active profile, checks it against the\n" +
+			"server and writes it to the credentials file, which lives outside the config.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, profile, err := g.target()
@@ -41,6 +44,8 @@ func newLoginCmd(g *globalOptions) *cobra.Command {
 					creds.EnvPassword)
 			}
 
+			// The store is deliberately left out of the lookup. Logging in again
+			// has to ask for a password, not quietly reuse the old one.
 			password, source, err := creds.Resolve(creds.Options{
 				Profile:  profile.Name(),
 				Stdin:    cmd.InOrStdin(),
@@ -51,11 +56,18 @@ func newLoginCmd(g *globalOptions) *cobra.Command {
 				return usageError{err}
 			}
 
+			if !noVerify {
+				if err := checkLogin(cmd.Context(), profile, password); err != nil {
+					return err
+				}
+				ui.OK("logged in to %s as %s", profile.Addr(), creds.User(profile.User))
+			}
+
 			if err := store.Set(profile.Name(), password); err != nil {
 				return err
 			}
 
-			ui.Info("stored the password for %s (%s@%s), read from %s", ui.Bold(profile.Name()), creds.User(profile.User), profile.Addr(), source)
+			ui.Info("stored the password for %s, read from %s", ui.Bold(profile.Name()), source)
 			ui.Info("credentials file: %s", ui.Path(store.Path()))
 
 			return nil
@@ -63,6 +75,7 @@ func newLoginCmd(g *globalOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&fromStdin, "password-stdin", false, "read the password from stdin instead of asking")
+	cmd.Flags().BoolVar(&noVerify, "no-verify", false, "store the password without checking it against the server")
 
 	return cmd
 }
@@ -100,43 +113,64 @@ func newLogoutCmd(g *globalOptions) *cobra.Command {
 }
 
 func newWhoamiCmd(g *globalOptions) *cobra.Command {
-	return &cobra.Command{
+	var offline bool
+
+	cmd := &cobra.Command{
 		Use:   "whoami",
-		Short: "Show the active profile and where its password comes from",
+		Short: "Show the active profile and check that it can log in",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, profile, err := g.target()
+			s, err := g.session()
 			if err != nil {
 				return err
 			}
 
-			store, err := g.credentials()
-			if err != nil {
+			if err := printTarget(cmd.OutOrStdout(), s); err != nil {
 				return err
 			}
 
-			_, source, err := creds.Resolve(creds.Options{
-				Profile: profile.Name(),
-				Store:   store,
-			})
-			if err != nil {
-				source = creds.SourceNone
+			if offline || s.source == creds.SourceNone {
+				return nil
 			}
 
-			return printTarget(cmd.OutOrStdout(), cfg, profile, store, source)
+			client, err := s.client()
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			if err := client.Connect(cmd.Context()); err != nil {
+				return err
+			}
+			ui.OK("logged in to %s as %s", s.profile.Addr(), creds.User(s.profile.User))
+
+			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&offline, "offline", false, "report the settings without contacting the server")
+
+	return cmd
 }
 
-func printTarget(w io.Writer, cfg *config.Config, profile config.Profile, store *creds.Store, source creds.Source) error {
+// checkLogin opens a connection, logs in and hangs up, which is the cheapest
+// proof that a password works.
+func checkLogin(ctx context.Context, profile config.Profile, password string) error {
+	client := newClient(profile, password)
+	defer client.Close()
+
+	return client.Connect(ctx)
+}
+
+func printTarget(w io.Writer, s *session) error {
 	rows := [][2]string{
-		{"profile", profile.Name()},
-		{"server", profile.Addr()},
-		{"user", creds.User(profile.User)},
-		{"base dir", profile.BaseDir},
-		{"tls", yesNo(profile.TLS)},
-		{"config", cfg.Path()},
-		{"password", source.String()},
+		{"profile", s.profile.Name()},
+		{"server", s.profile.Addr()},
+		{"user", creds.User(s.profile.User)},
+		{"base dir", s.profile.BaseDir},
+		{"tls", yesNo(s.profile.TLS)},
+		{"config", s.cfg.Path()},
+		{"password", s.source.String()},
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -149,11 +183,11 @@ func printTarget(w io.Writer, cfg *config.Config, profile config.Profile, store 
 		return err
 	}
 
-	if source == creds.SourceNone {
+	if s.source == creds.SourceNone {
 		ui.Warn("no password available, run `go-ftp login` or set %s", creds.EnvPassword)
 	}
-	if store.TooOpen() {
-		ui.Warn("%s is readable by other users, run: chmod 600 %s", store.Path(), store.Path())
+	if s.store.TooOpen() {
+		ui.Warn("%s is readable by other users, run: chmod 600 %s", s.store.Path(), s.store.Path())
 	}
 
 	return nil
