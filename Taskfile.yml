@@ -1,0 +1,104 @@
+version: '3'
+
+vars:
+  LOCAL_BIN: './bin'
+  MAIN_PKG: ./cmd/go-ftp
+  GOLANGCI_VERSION: v2.14.0
+  VERSION_PKG: github.com/happydez/go-ftp/internal/version
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  BUILD_DATE:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: >-
+    -s -w
+    -X {{.VERSION_PKG}}.Version={{.VERSION}}
+    -X {{.VERSION_PKG}}.Commit={{.COMMIT}}
+    -X {{.VERSION_PKG}}.Date={{.BUILD_DATE}}
+
+tasks:
+  info:
+    cmds:
+      - task --list
+    silent: true
+
+  install-golangci-lint:
+    desc: Install golangci-lint into ./bin
+    status:
+      - test -f {{.LOCAL_BIN}}/golangci-lint{{exeExt}}
+    cmds:
+      - GOBIN="$(pwd)/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_VERSION}}
+
+  lint:
+    desc: Run linters
+    deps: [install-golangci-lint]
+    cmds:
+      - '{{.LOCAL_BIN}}/golangci-lint{{exeExt}} run ./...'
+
+  lint-fix:
+    desc: Run linters with autofix
+    deps: [install-golangci-lint]
+    cmds:
+      - '{{.LOCAL_BIN}}/golangci-lint{{exeExt}} run ./... --fix'
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./... -cover
+
+  test-race:
+    desc: Run all tests with the race detector
+    cmds:
+      - go test ./... -race -count=1
+
+  build:
+    desc: Build for this machine into ./bin
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.LOCAL_BIN}}/go-ftp{{exeExt}} {{.MAIN_PKG}}
+
+  build-linux:
+    desc: Build for linux/amd64 into ./bin
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.LOCAL_BIN}}/go-ftp-linux-amd64 {{.MAIN_PKG}}
+
+  build-windows:
+    desc: Build for windows/amd64 into ./bin
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.LOCAL_BIN}}/go-ftp-windows-amd64.exe {{.MAIN_PKG}}
+
+  build-all:
+    desc: Build the release binaries for every target
+    cmds:
+      - task: build-linux
+      - task: build-windows
+
+  run:
+    desc: 'Run go-ftp from source, e.g. task run -- upload --local ./my --ftp /'
+    cmds:
+      - go run {{.MAIN_PKG}} {{.CLI_ARGS}}
+
+  tidy:
+    desc: Tidy go.mod / go.sum
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format the code
+    cmds:
+      - go fmt ./...
+
+  check:
+    desc: Format, lint and test
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
