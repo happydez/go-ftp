@@ -113,3 +113,23 @@ func tagged(w io.Writer, c *color.Color, tag, format string, a ...any) {
 	_, _ = c.Fprintf(w, "%-4s ", tag)
 	_, _ = fmt.Fprintf(w, format+"\n", a...)
 }
+
+// Bytes renders a size the way a person reads it.
+func Bytes(n int64) string {
+	const unit = 1024
+
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+
+	value := float64(n)
+
+	for _, name := range []string{"KB", "MB", "GB", "TB", "PB"} {
+		value /= unit
+		if value < unit {
+			return fmt.Sprintf("%.1f %s", value, name)
+		}
+	}
+
+	return fmt.Sprintf("%.1f EB", value/unit)
+}

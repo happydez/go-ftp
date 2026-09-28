@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"github.com/happydez/go-ftp/internal/config"
 	"github.com/happydez/go-ftp/internal/creds"
 	"github.com/happydez/go-ftp/internal/ftpx"
@@ -100,4 +102,34 @@ func newClient(profile config.Profile, password string) *ftpx.Client {
 		TLS:         profile.TLS,
 		TLSInsecure: profile.TLSInsecure,
 	})
+}
+
+// connect hands out a fresh connection per worker. The password is checked once
+// here, so that a run does not start only to fail on every single file.
+func (s *session) connect() (func() *ftpx.Client, error) {
+	if _, err := s.client(); err != nil {
+		return nil, err
+	}
+
+	return func() *ftpx.Client {
+		return newClient(s.profile, s.password)
+	}, nil
+}
+
+// withTimeout applies the deadline for the whole run, if the config sets one.
+func (s *session) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := s.cfg.Transfer.Timeout.Unwrap()
+	if timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+
+	return context.WithTimeout(ctx, timeout)
+}
+
+func (s *session) workers(fromFlag int) int {
+	if fromFlag > 0 {
+		return fromFlag
+	}
+
+	return s.cfg.Transfer.Workers
 }
