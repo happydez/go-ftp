@@ -76,7 +76,7 @@ func newDownloadCmd(g *globalOptions) *cobra.Command {
 				Connect: func() transfer.Conn {
 					return connect()
 				},
-				Move:     transfer.Downloader(opts.skipExisting),
+				Move:     transfer.Downloader(opts.skipExisting, progress.AddBytes),
 				OnResult: reporter{name: localSide, progress: progress}.report,
 			})
 

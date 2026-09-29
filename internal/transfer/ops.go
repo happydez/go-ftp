@@ -11,7 +11,7 @@ import (
 
 // Uploader sends a local file to the server, creating the directory it belongs
 // in on the way.
-func Uploader(skipExisting, inPlace bool) Operation {
+func Uploader(skipExisting, inPlace bool, count ByteCounter) Operation {
 	return func(ctx context.Context, conn Conn, job Job) (Outcome, error) {
 		if err := conn.EnsureDir(ctx, path.Dir(job.Remote)); err != nil {
 			return Moved, err
@@ -31,8 +31,10 @@ func Uploader(skipExisting, inPlace bool) Operation {
 			_ = file.Close()
 		}()
 
+		source := countingReader{r: file, count: count}
+
 		if inPlace {
-			if err := conn.Upload(ctx, job.Remote, file); err != nil {
+			if err := conn.Upload(ctx, job.Remote, source); err != nil {
 				return Moved, err
 			}
 
@@ -41,7 +43,7 @@ func Uploader(skipExisting, inPlace bool) Operation {
 
 		scratch := scratchName(job.Remote)
 
-		if err := conn.Upload(ctx, scratch, file); err != nil {
+		if err := conn.Upload(ctx, scratch, source); err != nil {
 			_ = conn.Remove(ctx, scratch)
 			return Moved, err
 		}
@@ -81,7 +83,7 @@ func putInPlace(ctx context.Context, conn Conn, from, to string) error {
 // Downloader brings a remote file here. It writes to a temporary name and
 // renames at the end, so that a run that is interrupted leaves no half file
 // looking like a finished one.
-func Downloader(skipExisting bool) Operation {
+func Downloader(skipExisting bool, count ByteCounter) Operation {
 	return func(ctx context.Context, conn Conn, job Job) (Outcome, error) {
 		if skipExisting {
 			if info, err := os.Stat(job.Local); err == nil && info.Size() == job.Size {
@@ -102,7 +104,7 @@ func Downloader(skipExisting bool) Operation {
 			_ = reader.Close()
 		}()
 
-		if err := writeFile(job.Local, reader); err != nil {
+		if err := writeFile(job.Local, countingReader{r: reader, count: count}); err != nil {
 			return Moved, err
 		}
 
@@ -144,4 +146,25 @@ func writeFile(target string, r io.Reader) error {
 	}
 
 	return nil
+}
+
+// ByteCounter is told how many bytes have just travelled. Every worker calls it
+// at once, so whatever is behind it has to be safe for that.
+type ByteCounter func(n int64)
+
+// countingReader reports what passes through it. Counting on the way past is
+// what lets a single large file show progress, since nothing else happens
+// between the start of a transfer and the end of it.
+type countingReader struct {
+	r     io.Reader
+	count ByteCounter
+}
+
+func (c countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 && c.count != nil {
+		c.count(int64(n))
+	}
+
+	return n, err
 }
