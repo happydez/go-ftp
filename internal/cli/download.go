@@ -15,9 +15,7 @@ func newDownloadCmd(g *globalOptions) *cobra.Command {
 		Short: "Fetch files from the server",
 		Long: "download brings a remote file, or the contents of a remote directory, into\n" +
 			"a local directory. Remote paths are relative to the base_dir of the active\n" +
-			"profile.\n\n" +
-			"A directory contributes its contents rather than itself, so\n" +
-			"--ftp /my --local . puts <base_dir>/my/a.txt at ./a.txt.",
+			"profile.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if opts.local == "" || opts.remote == "" {
@@ -40,38 +38,49 @@ func newDownloadCmd(g *globalOptions) *cobra.Command {
 			lister := connect()
 			defer lister.Close()
 
-			remoteSource, err := transfer.Resolve(s.profile.BaseDir, opts.remote)
-			if err != nil {
-				return usageError{err}
-			}
-
-			jobs, err := transfer.PlanDownload(ctx, lister, s.profile.BaseDir, opts.remote, opts.local)
+			remoteSource, err := s.remotePath(opts.remote)
 			if err != nil {
 				return err
 			}
-			if len(jobs) == 0 {
+
+			contents := opts.contents || remoteSource == s.profile.BaseDir
+
+			plan, err := transfer.PlanDownload(ctx, lister, remoteSource, opts.local, contents)
+			if err != nil {
+				return err
+			}
+			if plan.Empty() {
 				ui.Info("nothing to download from %s", ui.Path(opts.remote))
 				return nil
 			}
 
 			if opts.dryRun {
-				return printPlan(cmd.OutOrStdout(), jobs, "download", remoteSide, localSide)
+				return printPlan(cmd.OutOrStdout(), plan, "download", remoteSide, localSide)
 			}
 
 			ui.Header("downloading %d file(s), %s, from %s on %s to %s",
-				len(jobs), ui.Bytes(transfer.TotalSize(jobs)),
+				len(plan.Jobs), ui.Bytes(plan.TotalSize()),
 				ui.Path(remoteSource), s.profile.Addr(), ui.Path(opts.local))
 
-			summary, runErr := transfer.Run(ctx, jobs, transfer.Options{
+			// A remote directory holding no files would never be created by a
+			// transfer, so it is made before the pool starts.
+			if err := makeLocalDirs(plan.Dirs); err != nil {
+				return err
+			}
+
+			progress := ui.NewProgress(len(plan.Jobs), plan.TotalSize())
+
+			summary, runErr := transfer.Run(ctx, plan.Jobs, transfer.Options{
 				Workers:    s.workers(opts.workers),
 				MaxRetries: s.cfg.Transfer.MaxRetries,
 				Connect: func() transfer.Conn {
 					return connect()
 				},
 				Move:     transfer.Downloader(opts.skipExisting),
-				OnResult: reporter{name: localSide}.report,
+				OnResult: reporter{name: localSide, progress: progress}.report,
 			})
 
+			progress.Stop()
 			printSummary(summary, localSide)
 
 			if runErr != nil {

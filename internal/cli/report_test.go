@@ -9,11 +9,11 @@ import (
 	"github.com/happydez/go-ftp/internal/transfer"
 )
 
-func planned() []transfer.Job {
-	return []transfer.Job{
+func planned() transfer.Plan {
+	return transfer.Plan{Jobs: []transfer.Job{
 		{Local: "src/a.txt", Remote: "/my/a.txt", Size: 10},
 		{Local: "src/sub/b.txt", Remote: "/my/sub/b.txt", Size: 2038},
-	}
+	}}
 }
 
 func TestPlanPointsTheArrowTheWayTheFilesTravel(t *testing.T) {
@@ -56,8 +56,7 @@ func TestSummaryErrorOnlyFiresWhenSomethingFailed(t *testing.T) {
 		t.Errorf("error = %q, want the counts in it", err)
 	}
 
-	var ue usageError
-	if errors.As(err, &ue) {
+	if _, ok := errors.AsType[usageError](err); ok {
 		t.Error("a failed transfer is not a usage error")
 	}
 }

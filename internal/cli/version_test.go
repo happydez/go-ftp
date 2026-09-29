@@ -49,8 +49,7 @@ func TestVersionRefusesAnUnknownFormat(t *testing.T) {
 		t.Fatal("an unknown format should be refused")
 	}
 
-	var ue usageError
-	if !errors.As(err, &ue) {
+	if _, ok := errors.AsType[usageError](err); !ok {
 		t.Errorf("error = %v, want a usage error", err)
 	}
 }

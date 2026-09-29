@@ -54,9 +54,10 @@ func Execute(ctx context.Context) int {
 		return exitOK
 	}
 
-	var ue usageError
+	_, isUsage := errors.AsType[usageError](err)
+
 	switch {
-	case errors.As(err, &ue):
+	case isUsage:
 		ui.Error("%v", err)
 		return exitUsage
 	case errors.Is(err, context.Canceled):
@@ -110,6 +111,8 @@ func newRootCmd() *cobra.Command {
 		newDownloadCmd(g),
 		newLoginCmd(g),
 		newLsCmd(g),
+		newMvCmd(g),
+		newRmCmd(g),
 		newUploadCmd(g),
 		newLogoutCmd(g),
 		newWhoamiCmd(g),

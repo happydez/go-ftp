@@ -1,0 +1,23 @@
+FROM alpine:3 AS cert
+
+RUN apk add --no-cache openssl && \
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout /key.pem -out /crt.pem -subj "/CN=localhost" && \
+    cat /key.pem /crt.pem > /vsftpd.pem
+
+FROM fauria/vsftpd
+
+COPY --from=cert /vsftpd.pem /etc/vsftpd/vsftpd.pem
+
+RUN printf '%s\n' \
+        'ssl_enable=YES' \
+        'rsa_cert_file=/etc/vsftpd/vsftpd.pem' \
+        'rsa_private_key_file=/etc/vsftpd/vsftpd.pem' \
+        'force_local_logins_ssl=YES' \
+        'force_local_data_ssl=YES' \
+        'ssl_tlsv1_2=YES' \
+        'ssl_sslv2=NO' \
+        'ssl_sslv3=NO' \
+        'require_ssl_reuse=NO' \
+        'ssl_ciphers=HIGH' \
+        >> /etc/vsftpd/vsftpd.conf

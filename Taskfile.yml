@@ -102,3 +102,37 @@ tasks:
       - task: fmt
       - task: lint
       - task: test
+
+  test:up:
+    desc: Start the FTP servers in test/ (plain on 2121, FTPS on 2122)
+    dir: test
+    cmds:
+      - docker compose up -d --build
+      - docker compose ps
+
+  test:down:
+    desc: Stop the test servers and throw away what they hold
+    dir: test
+    cmds:
+      - docker compose down -v
+      - rm -rf data
+
+  test:logs:
+    desc: Follow the test servers
+    dir: test
+    cmds:
+      - docker compose logs -f
+
+  test:shell:
+    desc: 'A shell inside a test server (SERVER=ftps for the TLS one)'
+    dir: test
+    vars:
+      SERVER: '{{.SERVER | default "ftp"}}'
+    cmds:
+      - docker compose exec {{.SERVER}} bash -c "cd /home/vsftpd/tester && exec bash"
+
+  test:login:
+    desc: Store the test password for both profiles
+    cmds:
+      - echo s3cret | go run {{.MAIN_PKG}} --config test/go-ftp.test.yml login --password-stdin
+      - echo s3cret | go run {{.MAIN_PKG}} --config test/go-ftp.test.yml -p tls login --password-stdin

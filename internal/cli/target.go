@@ -2,10 +2,13 @@ package cli
 
 import (
 	"context"
+	"strings"
 
 	"github.com/happydez/go-ftp/internal/config"
 	"github.com/happydez/go-ftp/internal/creds"
 	"github.com/happydez/go-ftp/internal/ftpx"
+	"github.com/happydez/go-ftp/internal/transfer"
+	"github.com/happydez/go-ftp/internal/ui"
 )
 
 // config loads the file the flags point at, or the first one the search finds.
@@ -132,4 +135,25 @@ func (s *session) workers(fromFlag int) int {
 	}
 
 	return s.cfg.Transfer.Workers
+}
+
+// remotePath is the one way a remote path argument reaches the rest of the
+// program. It undoes what the shell may have done to it, then resolves it
+// against base_dir.
+func (s *session) remotePath(raw string) (string, error) {
+	cleaned, fixed, err := unmangleRemote(raw)
+	if err != nil {
+		return "", usageError{err}
+	}
+	if fixed != nil {
+		ui.Warn("%s", fixed)
+		ui.Warn("using %s, write it as //%s or set MSYS_NO_PATHCONV=1 to keep the shell out of it", ui.Path(cleaned), strings.TrimLeft(cleaned, "/"))
+	}
+
+	resolved, err := transfer.Resolve(s.profile.BaseDir, cleaned)
+	if err != nil {
+		return "", usageError{err}
+	}
+
+	return resolved, nil
 }

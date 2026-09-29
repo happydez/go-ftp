@@ -1,0 +1,53 @@
+services:
+  ftp:
+    image: fauria/vsftpd
+    container_name: go-ftp-plain
+    restart: unless-stopped
+    ports:
+      - "2121:21"
+      - "21100-21110:21100-21110"
+    environment:
+      FTP_USER: tester
+      FTP_PASS: s3cret
+      PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+      LOG_STDOUT: "yes"
+      REVERSE_LOOKUP_ENABLE: "NO"
+      PASV_ENABLE: "YES"
+      PASV_ADDR_RESOLVE: "NO"
+      PASV_PROMISCUOUS: "NO"
+      PORT_PROMISCUOUS: "NO"
+      FILE_OPEN_MODE: "0666"
+      LOCAL_UMASK: "022"
+      XFERLOG_STD_FORMAT: "NO"
+    volumes:
+      - ./data/plain:/home/vsftpd/tester
+
+  ftps:
+    build:
+      context: .
+      dockerfile: Dockerfile.ftps
+    image: go-ftp-test-ftps
+    container_name: go-ftp-tls
+    restart: unless-stopped
+    ports:
+      - "2122:21"
+      - "21200-21210:21200-21210"
+    environment:
+      FTP_USER: tester
+      FTP_PASS: s3cret
+      PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21200
+      PASV_MAX_PORT: 21210
+      LOG_STDOUT: "yes"
+      REVERSE_LOOKUP_ENABLE: "NO"
+      PASV_ENABLE: "YES"
+      PASV_ADDR_RESOLVE: "NO"
+      PASV_PROMISCUOUS: "NO"
+      PORT_PROMISCUOUS: "NO"
+      FILE_OPEN_MODE: "0666"
+      LOCAL_UMASK: "022"
+      XFERLOG_STD_FORMAT: "NO"
+    volumes:
+      - ./data/tls:/home/vsftpd/tester

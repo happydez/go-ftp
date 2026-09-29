@@ -47,9 +47,9 @@ func newLsCmd(g *globalOptions) *cobra.Command {
 			}
 			defer client.Close()
 
-			remote, err := transfer.Resolve(s.profile.BaseDir, path)
+			remote, err := s.remotePath(path)
 			if err != nil {
-				return usageError{err}
+				return err
 			}
 
 			ctx := cmd.Context()

@@ -1,0 +1,21 @@
+current_profile: plain
+
+profiles:
+  plain:
+    host: 127.0.0.1
+    port: 2121
+    user: tester
+    base_dir: /
+
+  tls:
+    host: 127.0.0.1
+    port: 2122
+    user: tester
+    base_dir: /
+    tls: true
+    tls_insecure: true
+
+transfer:
+  workers: 4
+  max_retries: 3
+  timeout: 0
