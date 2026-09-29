@@ -16,6 +16,7 @@ type moveOptions struct {
 	inPlace      bool
 	dryRun       bool
 	contents     bool
+	limit        string
 }
 
 func (m *moveOptions) bind(cmd *cobra.Command, localHelp, remoteHelp string) {
@@ -26,6 +27,7 @@ func (m *moveOptions) bind(cmd *cobra.Command, localHelp, remoteHelp string) {
 	f.BoolVar(&m.skipExisting, "skip-existing", false, "leave files whose size already matches")
 	f.BoolVar(&m.dryRun, "dry-run", false, "list what would move and stop")
 	f.BoolVar(&m.contents, "contents", false, "send what is inside the directory instead of the directory itself")
+	f.StringVar(&m.limit, "limit", "", "hold the whole run to a speed, such as 2MB or 500KB, overriding the config")
 }
 
 func newUploadCmd(g *globalOptions) *cobra.Command {
@@ -44,6 +46,11 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 			}
 
 			s, err := g.session()
+			if err != nil {
+				return err
+			}
+
+			throttle, err := s.throttle(opts.limit, s.cfg.Transfer.UploadLimit)
 			if err != nil {
 				return err
 			}
@@ -96,7 +103,12 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 				Connect: func() transfer.Conn {
 					return connect()
 				},
-				Move:     transfer.Uploader(opts.skipExisting, opts.inPlace, progress.AddBytes),
+				Move: transfer.Uploader(transfer.StreamOptions{
+					SkipExisting: opts.skipExisting,
+					InPlace:      opts.inPlace,
+					Count:        progress.AddBytes,
+					Throttle:     throttle,
+				}),
 				OnResult: reporter{name: remoteSide, progress: progress}.report,
 			})
 

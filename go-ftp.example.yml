@@ -34,3 +34,9 @@ transfer:
   # A deadline for the whole run, not for one file. 0 means no limit and that
   # is the default, so that a big upload does not die on a wall clock.
   timeout: 0
+
+  # How fast bytes may travel, added up over the whole run rather than per
+  # connection. 0 means no limit. KB and MB are 1024 based here, matching what
+  # the tool prints.
+  upload_limit: 0
+  download_limit: 0

@@ -157,3 +157,23 @@ func (s *session) remotePath(raw string) (string, error) {
 
 	return resolved, nil
 }
+
+// throttle builds the speed limit for a run. The flag wins over the config, and
+// an empty flag leaves the config alone.
+func (s *session) throttle(fromFlag string, fromConfig config.Size) (*transfer.Throttle, error) {
+	limit := fromConfig
+
+	if fromFlag != "" {
+		parsed, err := config.ParseSize(fromFlag)
+		if err != nil {
+			return nil, usageError{err}
+		}
+		limit = parsed
+	}
+
+	if limit > 0 {
+		ui.Info("holding the run to %s a second", ui.Bold(limit.String()))
+	}
+
+	return transfer.NewThrottle(limit.Bytes()), nil
+}
