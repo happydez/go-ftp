@@ -96,7 +96,7 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 				Connect: func() transfer.Conn {
 					return connect()
 				},
-				Move:     transfer.Uploader(opts.skipExisting, opts.inPlace),
+				Move:     transfer.Uploader(opts.skipExisting, opts.inPlace, progress.AddBytes),
 				OnResult: reporter{name: remoteSide, progress: progress}.report,
 			})
 

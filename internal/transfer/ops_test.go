@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -52,7 +53,7 @@ func TestUploaderSendsTheFile(t *testing.T) {
 
 	conn := &fakeConn{}
 
-	outcome, err := Uploader(false, true)(t.Context(), conn, Job{
+	outcome, err := Uploader(false, true, nil)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -69,7 +70,7 @@ func TestUploaderSendsTheFile(t *testing.T) {
 }
 
 func TestUploaderReportsAMissingLocalFile(t *testing.T) {
-	_, err := Uploader(false, true)(t.Context(), &fakeConn{}, Job{
+	_, err := Uploader(false, true, nil)(t.Context(), &fakeConn{}, Job{
 		Local:  filepath.Join(t.TempDir(), "gone.txt"),
 		Remote: "/my/gone.txt",
 	})
@@ -87,7 +88,7 @@ func TestUploaderSkipsAFileOfTheSameSize(t *testing.T) {
 
 	conn := &fakeConn{sizes: map[string]int64{"/my/a.txt": 5}}
 
-	outcome, err := Uploader(true, true)(t.Context(), conn, Job{
+	outcome, err := Uploader(true, true, nil)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -113,7 +114,7 @@ func TestUploaderResendsAFileOfADifferentSize(t *testing.T) {
 	// A half uploaded file from an earlier run.
 	conn := &fakeConn{sizes: map[string]int64{"/my/a.txt": 2}}
 
-	outcome, err := Uploader(true, true)(t.Context(), conn, Job{
+	outcome, err := Uploader(true, true, nil)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -132,7 +133,7 @@ func TestDownloaderWritesTheFileAndItsDirectories(t *testing.T) {
 
 	conn := &opsConn{contents: map[string]string{"/my/sub/deep/b.txt": "contents"}}
 
-	outcome, err := Downloader(false)(t.Context(), conn, Job{
+	outcome, err := Downloader(false, nil)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/sub/deep/b.txt",
 		Size:   8,
@@ -162,7 +163,7 @@ func TestDownloaderLeavesNothingBehindWhenItFails(t *testing.T) {
 		readErr:  errors.New("connection reset"),
 	}
 
-	if _, err := Downloader(false)(t.Context(), conn, Job{Local: local, Remote: "/my/b.txt"}); err == nil {
+	if _, err := Downloader(false, nil)(t.Context(), conn, Job{Local: local, Remote: "/my/b.txt"}); err == nil {
 		t.Fatal("a broken transfer should be an error")
 	}
 
@@ -188,7 +189,7 @@ func TestDownloaderReplacesAnExistingFile(t *testing.T) {
 
 	conn := &opsConn{contents: map[string]string{"/my/b.txt": "new contents"}}
 
-	if _, err := Downloader(false)(t.Context(), conn, Job{Local: local, Remote: "/my/b.txt"}); err != nil {
+	if _, err := Downloader(false, nil)(t.Context(), conn, Job{Local: local, Remote: "/my/b.txt"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -210,7 +211,7 @@ func TestDownloaderSkipsAFileOfTheSameSize(t *testing.T) {
 
 	conn := &opsConn{contents: map[string]string{"/my/b.txt": "different"}}
 
-	outcome, err := Downloader(true)(t.Context(), conn, Job{
+	outcome, err := Downloader(true, nil)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/b.txt",
 		Size:   5,
@@ -234,7 +235,7 @@ func TestDownloaderSkipsAFileOfTheSameSize(t *testing.T) {
 func TestDownloaderReportsAMissingRemoteFile(t *testing.T) {
 	conn := &opsConn{contents: map[string]string{}}
 
-	_, err := Downloader(false)(t.Context(), conn, Job{
+	_, err := Downloader(false, nil)(t.Context(), conn, Job{
 		Local:  filepath.Join(t.TempDir(), "b.txt"),
 		Remote: "/my/nope.txt",
 	})
@@ -271,7 +272,7 @@ func localFile(t *testing.T, body string) string {
 func TestUploaderGoesThroughAScratchNameAndRenames(t *testing.T) {
 	conn := &fakeConn{}
 
-	outcome, err := Uploader(false, false)(t.Context(), conn, Job{
+	outcome, err := Uploader(false, false, nil)(t.Context(), conn, Job{
 		Local:  localFile(t, "hello"),
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -297,7 +298,7 @@ func TestUploaderLeavesTheTargetAloneWhenTheUploadFails(t *testing.T) {
 		uploadErr: errors.New("connection reset"),
 	}
 
-	_, err := Uploader(false, false)(t.Context(), conn, Job{
+	_, err := Uploader(false, false, nil)(t.Context(), conn, Job{
 		Local:  localFile(t, "newer"),
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -320,7 +321,7 @@ func TestUploaderInPlaceTruncatesTheTargetWhenItFails(t *testing.T) {
 		uploadErr: errors.New("connection reset"),
 	}
 
-	_, err := Uploader(false, true)(t.Context(), conn, Job{
+	_, err := Uploader(false, true, nil)(t.Context(), conn, Job{
 		Local:  localFile(t, "newer"),
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -346,7 +347,7 @@ func TestUploaderClearsTheWayWhenRenameIsRefused(t *testing.T) {
 		}
 	}
 
-	if _, err := Uploader(false, false)(t.Context(), conn, Job{
+	if _, err := Uploader(false, false, nil)(t.Context(), conn, Job{
 		Local:  localFile(t, "hello"),
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -370,12 +371,88 @@ func TestUploaderGivesUpWhenRenameKeepsFailing(t *testing.T) {
 		renameErr: refused,
 	}
 
-	_, err := Uploader(false, false)(t.Context(), conn, Job{
+	_, err := Uploader(false, false, nil)(t.Context(), conn, Job{
 		Local:  localFile(t, "hello"),
 		Remote: "/my/a.txt",
 		Size:   5,
 	})
 	if !errors.Is(err, refused) {
 		t.Errorf("error = %v, want the refusal from the server", err)
+	}
+}
+
+func counted() (ByteCounter, *atomic.Int64) {
+	var total atomic.Int64
+	return func(n int64) {
+		total.Add(n)
+	}, &total
+}
+
+func TestUploaderCountsBytesAsTheyTravel(t *testing.T) {
+	const body = "the quick brown fox"
+
+	count, total := counted()
+
+	if _, err := Uploader(false, true, count)(t.Context(), &fakeConn{}, Job{
+		Local:  localFile(t, body),
+		Remote: "/my/a.txt",
+		Size:   int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := total.Load(); got != int64(len(body)) {
+		t.Errorf("counted %d bytes, want %d", got, len(body))
+	}
+}
+
+func TestDownloaderCountsBytesAsTheyTravel(t *testing.T) {
+	const body = "jumps over the lazy dog"
+
+	count, total := counted()
+
+	conn := &opsConn{contents: map[string]string{"/my/b.txt": body}}
+
+	if _, err := Downloader(false, count)(t.Context(), conn, Job{
+		Local:  filepath.Join(t.TempDir(), "b.txt"),
+		Remote: "/my/b.txt",
+		Size:   int64(len(body)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := total.Load(); got != int64(len(body)) {
+		t.Errorf("counted %d bytes, want %d", got, len(body))
+	}
+}
+
+func TestCountingHappensDuringTheTransferNotAfterIt(t *testing.T) {
+	const body = "half of this never arrives"
+
+	count, total := counted()
+
+	conn := &opsConn{
+		contents: map[string]string{"/my/b.txt": body},
+		readErr:  errors.New("connection reset"),
+	}
+
+	if _, err := Downloader(false, count)(t.Context(), conn, Job{
+		Local:  filepath.Join(t.TempDir(), "b.txt"),
+		Remote: "/my/b.txt",
+	}); err == nil {
+		t.Fatal("a broken transfer should be an error")
+	}
+
+	if got := total.Load(); got != int64(len(body)) {
+		t.Errorf("counted %d bytes, want the %d that did arrive", got, len(body))
+	}
+}
+
+func TestOperationsTakeANilCounter(t *testing.T) {
+	if _, err := Uploader(false, true, nil)(t.Context(), &fakeConn{}, Job{
+		Local:  localFile(t, "x"),
+		Remote: "/my/a.txt",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

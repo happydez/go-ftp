@@ -33,25 +33,20 @@ type reporter struct {
 }
 
 func (r reporter) report(result transfer.Result) {
-	r.progress.Clear()
-
 	path := ui.Path(r.name(result.Job))
 
-	switch {
-	case result.Err != nil:
-		ui.Fail("%s: %v", path, result.Err)
-	case result.Outcome == transfer.Skipped:
-		ui.Skip("%s is already there", path)
-	default:
-		ui.OK("%s (%s)", path, ui.Bytes(result.Job.Size))
-	}
+	r.progress.Line(func() {
+		switch {
+		case result.Err != nil:
+			ui.Fail("%s: %v", path, result.Err)
+		case result.Outcome == transfer.Skipped:
+			ui.Skip("%s is already there", path)
+		default:
+			ui.OK("%s (%s)", path, ui.Bytes(result.Job.Size))
+		}
+	})
 
-	moved := int64(0)
-	if result.Err == nil && result.Outcome == transfer.Moved {
-		moved = result.Job.Size
-	}
-
-	r.progress.Advance(moved)
+	r.progress.Advance()
 }
 
 // printPlan is what --dry-run answers with. The arrow points the way the files
