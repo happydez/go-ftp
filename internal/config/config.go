@@ -57,6 +57,10 @@ type Transfer struct {
 	MaxRetries int `yaml:"max_retries" json:"max_retries"`
 	// A deadline for the whole run, not for one file. 0 means no limit.
 	Timeout Duration `yaml:"timeout" json:"timeout"`
+	// How fast bytes may travel, added up over the whole run rather than per
+	// connection. 0 means no limit.
+	UploadLimit   Size `yaml:"upload_limit" json:"upload_limit"`
+	DownloadLimit Size `yaml:"download_limit" json:"download_limit"`
 }
 
 // Default is what a config looks like before a file is read.
@@ -184,6 +188,12 @@ func (c *Config) validate() error {
 	}
 	if c.Transfer.Timeout < 0 {
 		problems = append(problems, fmt.Sprintf("transfer.timeout cannot be negative, got %s", c.Transfer.Timeout))
+	}
+	if c.Transfer.UploadLimit < 0 {
+		problems = append(problems, fmt.Sprintf("transfer.upload_limit cannot be negative, got %s", c.Transfer.UploadLimit))
+	}
+	if c.Transfer.DownloadLimit < 0 {
+		problems = append(problems, fmt.Sprintf("transfer.download_limit cannot be negative, got %s", c.Transfer.DownloadLimit))
 	}
 
 	if len(problems) == 0 {

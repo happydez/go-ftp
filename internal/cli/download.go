@@ -27,6 +27,11 @@ func newDownloadCmd(g *globalOptions) *cobra.Command {
 				return err
 			}
 
+			throttle, err := s.throttle(opts.limit, s.cfg.Transfer.DownloadLimit)
+			if err != nil {
+				return err
+			}
+
 			connect, err := s.connect()
 			if err != nil {
 				return err
@@ -76,7 +81,11 @@ func newDownloadCmd(g *globalOptions) *cobra.Command {
 				Connect: func() transfer.Conn {
 					return connect()
 				},
-				Move:     transfer.Downloader(opts.skipExisting, progress.AddBytes),
+				Move: transfer.Downloader(transfer.StreamOptions{
+					SkipExisting: opts.skipExisting,
+					Count:        progress.AddBytes,
+					Throttle:     throttle,
+				}),
 				OnResult: reporter{name: localSide, progress: progress}.report,
 			})
 

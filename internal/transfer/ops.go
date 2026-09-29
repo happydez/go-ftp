@@ -9,15 +9,34 @@ import (
 	"path/filepath"
 )
 
+// StreamOptions is everything that watches or holds back the bytes of one file.
+// The zero value adds nothing to a plain transfer.
+type StreamOptions struct {
+	// SkipExisting leaves a file alone when its size already matches.
+	SkipExisting bool
+	// InPlace writes straight to the target name instead of uploading under a
+	// scratch name and renaming. Uploads only.
+	InPlace bool
+	// Count is told about bytes as they travel.
+	Count ByteCounter
+	// Throttle holds the whole run to a speed. Shared by every worker.
+	Throttle *Throttle
+}
+
+// watched wraps a stream with everything the options ask for.
+func (o StreamOptions) watched(ctx context.Context, r io.Reader) io.Reader {
+	return countingReader{r: o.Throttle.reader(ctx, r), count: o.Count}
+}
+
 // Uploader sends a local file to the server, creating the directory it belongs
 // in on the way.
-func Uploader(skipExisting, inPlace bool, count ByteCounter) Operation {
+func Uploader(opts StreamOptions) Operation {
 	return func(ctx context.Context, conn Conn, job Job) (Outcome, error) {
 		if err := conn.EnsureDir(ctx, path.Dir(job.Remote)); err != nil {
 			return Moved, err
 		}
 
-		if skipExisting {
+		if opts.SkipExisting {
 			if size, ok := conn.Size(ctx, job.Remote); ok && size == job.Size {
 				return Skipped, nil
 			}
@@ -31,9 +50,9 @@ func Uploader(skipExisting, inPlace bool, count ByteCounter) Operation {
 			_ = file.Close()
 		}()
 
-		source := countingReader{r: file, count: count}
+		source := opts.watched(ctx, file)
 
-		if inPlace {
+		if opts.InPlace {
 			if err := conn.Upload(ctx, job.Remote, source); err != nil {
 				return Moved, err
 			}
@@ -83,9 +102,9 @@ func putInPlace(ctx context.Context, conn Conn, from, to string) error {
 // Downloader brings a remote file here. It writes to a temporary name and
 // renames at the end, so that a run that is interrupted leaves no half file
 // looking like a finished one.
-func Downloader(skipExisting bool, count ByteCounter) Operation {
+func Downloader(opts StreamOptions) Operation {
 	return func(ctx context.Context, conn Conn, job Job) (Outcome, error) {
-		if skipExisting {
+		if opts.SkipExisting {
 			if info, err := os.Stat(job.Local); err == nil && info.Size() == job.Size {
 				return Skipped, nil
 			}
@@ -104,7 +123,7 @@ func Downloader(skipExisting bool, count ByteCounter) Operation {
 			_ = reader.Close()
 		}()
 
-		if err := writeFile(job.Local, countingReader{r: reader, count: count}); err != nil {
+		if err := writeFile(job.Local, opts.watched(ctx, reader)); err != nil {
 			return Moved, err
 		}
 
