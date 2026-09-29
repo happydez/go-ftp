@@ -156,8 +156,16 @@ func TestListReturnsFullPathsAndNoDotEntries(t *testing.T) {
 		if entry.Name == "sub" && !entry.Dir {
 			t.Error("sub should be reported as a directory")
 		}
-		if entry.Name == "a.txt" && entry.Dir {
-			t.Error("a.txt should not be reported as a directory")
+		if entry.Name == "a.txt" {
+			if entry.Dir {
+				t.Error("a.txt should not be reported as a directory")
+			}
+			if entry.Size != 1 {
+				t.Errorf("a.txt size = %d, want 1", entry.Size)
+			}
+			if entry.ModTime.IsZero() {
+				t.Error("a.txt has no modification time")
+			}
 		}
 	}
 }
@@ -180,11 +188,20 @@ func TestWalkGoesAllTheWayDown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var files []string
+	var (
+		files []string
+		bytes int64
+	)
+
 	for _, entry := range entries {
 		if !entry.Dir {
 			files = append(files, entry.Path)
+			bytes += entry.Size
 		}
+	}
+
+	if want := int64(len("/tree/top.txt") + len("/tree/deep/middle.txt") + len("/tree/deep/deeper/bottom.txt")); bytes != want {
+		t.Errorf("the sizes add up to %d, want %d", bytes, want)
 	}
 
 	want := "/tree/deep/deeper/bottom.txt,/tree/deep/middle.txt,/tree/top.txt"
@@ -280,5 +297,72 @@ func TestResetForgetsTheDirectoryCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "cached")); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestRenameMovesAFile(t *testing.T) {
+	client, root := dial(t)
+	ctx := t.Context()
+
+	if err := client.Upload(ctx, "/scratch.part", strings.NewReader("finished")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Rename(ctx, "/scratch.part", "/real.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "real.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "finished" {
+		t.Errorf("real.txt holds %q, want finished", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "scratch.part")); !os.IsNotExist(err) {
+		t.Error("the old name is still there")
+	}
+}
+
+func TestRenameReplacesTheTarget(t *testing.T) {
+	client, root := dial(t)
+	ctx := t.Context()
+
+	if err := client.Upload(ctx, "/real.txt", strings.NewReader("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Upload(ctx, "/scratch.part", strings.NewReader("new contents")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := client.Rename(ctx, "/scratch.part", "/real.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(root, "real.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new contents" {
+		t.Errorf("real.txt holds %q, want the new contents", got)
+	}
+}
+
+func TestRemoveDeletesAFile(t *testing.T) {
+	client, root := dial(t)
+	ctx := t.Context()
+
+	if err := client.Upload(ctx, "/gone.txt", strings.NewReader("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Remove(ctx, "/gone.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "gone.txt")); !os.IsNotExist(err) {
+		t.Error("the file is still on the server")
+	}
+
+	if err := client.Remove(ctx, "/gone.txt"); err == nil {
+		t.Error("removing something twice should be an error")
 	}
 }

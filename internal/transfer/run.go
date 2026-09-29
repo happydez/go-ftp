@@ -20,6 +20,8 @@ type Conn interface {
 	Size(ctx context.Context, remotePath string) (int64, bool)
 	Upload(ctx context.Context, remotePath string, r io.Reader) error
 	Download(ctx context.Context, remotePath string) (io.ReadCloser, error)
+	Rename(ctx context.Context, from, to string) error
+	Remove(ctx context.Context, remotePath string) error
 	Reset()
 	Close()
 }

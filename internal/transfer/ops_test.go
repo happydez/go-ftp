@@ -52,7 +52,7 @@ func TestUploaderSendsTheFile(t *testing.T) {
 
 	conn := &fakeConn{}
 
-	outcome, err := Uploader(false)(t.Context(), conn, Job{
+	outcome, err := Uploader(false, true)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -69,7 +69,7 @@ func TestUploaderSendsTheFile(t *testing.T) {
 }
 
 func TestUploaderReportsAMissingLocalFile(t *testing.T) {
-	_, err := Uploader(false)(t.Context(), &fakeConn{}, Job{
+	_, err := Uploader(false, true)(t.Context(), &fakeConn{}, Job{
 		Local:  filepath.Join(t.TempDir(), "gone.txt"),
 		Remote: "/my/gone.txt",
 	})
@@ -87,7 +87,7 @@ func TestUploaderSkipsAFileOfTheSameSize(t *testing.T) {
 
 	conn := &fakeConn{sizes: map[string]int64{"/my/a.txt": 5}}
 
-	outcome, err := Uploader(true)(t.Context(), conn, Job{
+	outcome, err := Uploader(true, true)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -113,7 +113,7 @@ func TestUploaderResendsAFileOfADifferentSize(t *testing.T) {
 	// A half uploaded file from an earlier run.
 	conn := &fakeConn{sizes: map[string]int64{"/my/a.txt": 2}}
 
-	outcome, err := Uploader(true)(t.Context(), conn, Job{
+	outcome, err := Uploader(true, true)(t.Context(), conn, Job{
 		Local:  local,
 		Remote: "/my/a.txt",
 		Size:   5,
@@ -240,5 +240,142 @@ func TestDownloaderReportsAMissingRemoteFile(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("a file that is not on the server should be an error")
+	}
+}
+
+func TestScratchNameSitsNextToTheTarget(t *testing.T) {
+	cases := map[string]string{
+		"/my/a.txt":         "/my/.go-ftp-a.txt.part",
+		"/my/sub/deep/c.md": "/my/sub/deep/.go-ftp-c.md.part",
+		"/a.txt":            "/.go-ftp-a.txt.part",
+	}
+
+	for remote, want := range cases {
+		if got := scratchName(remote); got != want {
+			t.Errorf("scratchName(%q) = %q, want %q", remote, got, want)
+		}
+	}
+}
+
+func localFile(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+func TestUploaderGoesThroughAScratchNameAndRenames(t *testing.T) {
+	conn := &fakeConn{}
+
+	outcome, err := Uploader(false, false)(t.Context(), conn, Job{
+		Local:  localFile(t, "hello"),
+		Remote: "/my/a.txt",
+		Size:   5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != Moved {
+		t.Errorf("outcome = %v, want Moved", outcome)
+	}
+
+	if got := strings.Join(conn.renamed, ","); got != "/my/.go-ftp-a.txt.part -> /my/a.txt" {
+		t.Errorf("renames = %q, want the scratch file moved into place", got)
+	}
+	if got := strings.Join(conn.uploaded, ","); got != "/my/a.txt" {
+		t.Errorf("the file ended up at %q, want /my/a.txt", got)
+	}
+}
+
+func TestUploaderLeavesTheTargetAloneWhenTheUploadFails(t *testing.T) {
+	conn := &fakeConn{
+		sizes:     map[string]int64{"/my/a.txt": 5},
+		uploadErr: errors.New("connection reset"),
+	}
+
+	_, err := Uploader(false, false)(t.Context(), conn, Job{
+		Local:  localFile(t, "newer"),
+		Remote: "/my/a.txt",
+		Size:   5,
+	})
+	if err == nil {
+		t.Fatal("a broken upload should be an error")
+	}
+
+	if size, ok := conn.sizes["/my/a.txt"]; !ok || size != 5 {
+		t.Errorf("the file on the server is now %d bytes, want the original 5", size)
+	}
+	if got := strings.Join(conn.removed, ","); got != "/my/.go-ftp-a.txt.part" {
+		t.Errorf("removed %q, want the scratch file cleaned up", got)
+	}
+}
+
+func TestUploaderInPlaceTruncatesTheTargetWhenItFails(t *testing.T) {
+	conn := &fakeConn{
+		sizes:     map[string]int64{"/my/a.txt": 5},
+		uploadErr: errors.New("connection reset"),
+	}
+
+	_, err := Uploader(false, true)(t.Context(), conn, Job{
+		Local:  localFile(t, "newer"),
+		Remote: "/my/a.txt",
+		Size:   5,
+	})
+	if err == nil {
+		t.Fatal("a broken upload should be an error")
+	}
+
+	if size := conn.sizes["/my/a.txt"]; size != 0 {
+		t.Errorf("the file is %d bytes, and --inplace is expected to have emptied it", size)
+	}
+}
+
+func TestUploaderClearsTheWayWhenRenameIsRefused(t *testing.T) {
+	conn := &fakeConn{
+		sizes:     map[string]int64{"/my/a.txt": 5},
+		renameErr: errors.New("550 file exists"),
+	}
+
+	conn.onRemove = func(remotePath string) {
+		if remotePath == "/my/a.txt" {
+			conn.renameErr = nil
+		}
+	}
+
+	if _, err := Uploader(false, false)(t.Context(), conn, Job{
+		Local:  localFile(t, "hello"),
+		Remote: "/my/a.txt",
+		Size:   5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := strings.Join(conn.removed, ","); got != "/my/a.txt" {
+		t.Errorf("removed %q, want the target cleared out of the way", got)
+	}
+	if got := strings.Join(conn.renamed, ","); got != "/my/.go-ftp-a.txt.part -> /my/a.txt" {
+		t.Errorf("renames = %q, want the second attempt to have worked", got)
+	}
+}
+
+func TestUploaderGivesUpWhenRenameKeepsFailing(t *testing.T) {
+	refused := errors.New("550 not allowed")
+
+	conn := &fakeConn{
+		sizes:     map[string]int64{"/my/a.txt": 5},
+		renameErr: refused,
+	}
+
+	_, err := Uploader(false, false)(t.Context(), conn, Job{
+		Local:  localFile(t, "hello"),
+		Remote: "/my/a.txt",
+		Size:   5,
+	})
+	if !errors.Is(err, refused) {
+		t.Errorf("error = %v, want the refusal from the server", err)
 	}
 }

@@ -14,11 +14,16 @@ import (
 
 // fakeConn answers from a script and records what was asked of it.
 type fakeConn struct {
-	mu       sync.Mutex
-	resets   int
-	closed   bool
-	uploaded []string
-	sizes    map[string]int64
+	mu        sync.Mutex
+	resets    int
+	closed    bool
+	uploaded  []string
+	renamed   []string
+	removed   []string
+	sizes     map[string]int64
+	uploadErr error
+	onRemove  func(remotePath string)
+	renameErr error
 }
 
 func (c *fakeConn) EnsureDir(context.Context, string) error {
@@ -42,6 +47,15 @@ func (c *fakeConn) Upload(_ context.Context, remotePath string, r io.Reader) err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.uploadErr != nil {
+		if c.sizes == nil {
+			c.sizes = make(map[string]int64)
+		}
+		c.sizes[remotePath] = 0
+
+		return c.uploadErr
+	}
+
 	c.uploaded = append(c.uploaded, remotePath)
 
 	return nil
@@ -49,6 +63,39 @@ func (c *fakeConn) Upload(_ context.Context, remotePath string, r io.Reader) err
 
 func (c *fakeConn) Download(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (c *fakeConn) Rename(_ context.Context, from, to string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.renameErr != nil {
+		return c.renameErr
+	}
+
+	c.renamed = append(c.renamed, from+" -> "+to)
+
+	for i, name := range c.uploaded {
+		if name == from {
+			c.uploaded[i] = to
+		}
+	}
+
+	return nil
+}
+
+func (c *fakeConn) Remove(_ context.Context, remotePath string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.removed = append(c.removed, remotePath)
+	delete(c.sizes, remotePath)
+
+	if c.onRemove != nil {
+		c.onRemove(remotePath)
+	}
+
+	return nil
 }
 
 func (c *fakeConn) Reset() {

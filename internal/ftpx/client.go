@@ -259,3 +259,30 @@ func sortEntries(entries []Entry) {
 		return entries[i].Path < entries[j].Path
 	})
 }
+
+// Rename moves a remote file. An upload uses it to put a finished file in place
+// without ever showing a half written one under the real name.
+func (c *Client) Rename(ctx context.Context, from, to string) error {
+	if err := c.Connect(ctx); err != nil {
+		return err
+	}
+
+	if err := c.conn.Rename(from, to); err != nil {
+		return fmt.Errorf("rename %s to %s: %w", from, to, err)
+	}
+
+	return nil
+}
+
+// Remove deletes a remote file.
+func (c *Client) Remove(ctx context.Context, remotePath string) error {
+	if err := c.Connect(ctx); err != nil {
+		return err
+	}
+
+	if err := c.conn.Delete(remotePath); err != nil {
+		return fmt.Errorf("delete %s: %w", remotePath, err)
+	}
+
+	return nil
+}
