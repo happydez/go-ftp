@@ -15,6 +15,7 @@ type moveOptions struct {
 	skipExisting bool
 	inPlace      bool
 	dryRun       bool
+	contents     bool
 }
 
 func (m *moveOptions) bind(cmd *cobra.Command, localHelp, remoteHelp string) {
@@ -24,6 +25,7 @@ func (m *moveOptions) bind(cmd *cobra.Command, localHelp, remoteHelp string) {
 	f.IntVar(&m.workers, "workers", 0, "files in flight at once, overriding the config")
 	f.BoolVar(&m.skipExisting, "skip-existing", false, "leave files whose size already matches")
 	f.BoolVar(&m.dryRun, "dry-run", false, "list what would move and stop")
+	f.BoolVar(&m.contents, "contents", false, "send what is inside the directory instead of the directory itself")
 }
 
 func newUploadCmd(g *globalOptions) *cobra.Command {
@@ -34,9 +36,7 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 		Short: "Send files to the server",
 		Long: "upload sends a local file or the contents of a local directory to a\n" +
 			"directory on the server. Remote paths are relative to the base_dir of the\n" +
-			"active profile.\n\n" +
-			"A directory contributes its contents rather than itself, so\n" +
-			"--local ./my --ftp / puts ./my/a.txt at <base_dir>/a.txt.",
+			"active profile.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if opts.local == "" || opts.remote == "" {
@@ -48,23 +48,26 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 				return err
 			}
 
-			remoteDir, err := transfer.Resolve(s.profile.BaseDir, opts.remote)
+			remoteDir, err := s.remotePath(opts.remote)
+			if err != nil {
+				return err
+			}
+
+			plan, err := transfer.PlanUpload(remoteDir, opts.local, opts.contents)
 			if err != nil {
 				return usageError{err}
 			}
 
-			jobs, err := transfer.PlanUpload(s.profile.BaseDir, opts.local, opts.remote)
-			if err != nil {
-				return usageError{err}
-			}
-			if len(jobs) == 0 {
+			reportIgnored(plan)
+
+			if plan.Empty() {
 				ui.Info("nothing to upload from %s", ui.Path(opts.local))
 
 				return nil
 			}
 
 			if opts.dryRun {
-				return printPlan(cmd.OutOrStdout(), jobs, "upload", localSide, remoteSide)
+				return printPlan(cmd.OutOrStdout(), plan, "upload", localSide, remoteSide)
 			}
 
 			connect, err := s.connect()
@@ -73,22 +76,31 @@ func newUploadCmd(g *globalOptions) *cobra.Command {
 			}
 
 			ui.Header("uploading %d file(s), %s, from %s to %s on %s",
-				len(jobs), ui.Bytes(transfer.TotalSize(jobs)),
+				len(plan.Jobs), ui.Bytes(plan.TotalSize()),
 				ui.Path(opts.local), ui.Path(remoteDir), s.profile.Addr())
 
 			ctx, cancel := s.withTimeout(cmd.Context())
 			defer cancel()
 
-			summary, runErr := transfer.Run(ctx, jobs, transfer.Options{
+			// A directory with no files of its own would never be created by a
+			// transfer, so it is made before the pool starts.
+			if err := makeRemoteDirs(ctx, connect, plan.Dirs); err != nil {
+				return err
+			}
+
+			progress := ui.NewProgress(len(plan.Jobs), plan.TotalSize())
+
+			summary, runErr := transfer.Run(ctx, plan.Jobs, transfer.Options{
 				Workers:    s.workers(opts.workers),
 				MaxRetries: s.cfg.Transfer.MaxRetries,
 				Connect: func() transfer.Conn {
 					return connect()
 				},
 				Move:     transfer.Uploader(opts.skipExisting, opts.inPlace),
-				OnResult: reporter{name: remoteSide}.report,
+				OnResult: reporter{name: remoteSide, progress: progress}.report,
 			})
 
+			progress.Stop()
 			printSummary(summary, remoteSide)
 
 			if runErr != nil {

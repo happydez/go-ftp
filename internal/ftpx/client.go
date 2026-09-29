@@ -286,3 +286,18 @@ func (c *Client) Remove(ctx context.Context, remotePath string) error {
 
 	return nil
 }
+
+// RemoveDir deletes a directory and everything under it.
+func (c *Client) RemoveDir(ctx context.Context, dir string) error {
+	if err := c.Connect(ctx); err != nil {
+		return err
+	}
+
+	if err := c.conn.RemoveDirRecur(dir); err != nil {
+		return fmt.Errorf("delete %s: %w", dir, err)
+	}
+
+	c.known = make(map[string]struct{})
+
+	return nil
+}
